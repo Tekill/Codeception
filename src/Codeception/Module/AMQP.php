@@ -47,12 +47,13 @@ use PhpAmqpLib\Exception\AMQPProtocolChannelException;
 class AMQP extends CodeceptionModule implements RequiresPackage
 {
     protected $config = [
-        'host'     => 'localhost',
-        'username' => 'guest',
-        'password' => 'guest',
-        'port'     => '5672',
-        'vhost'    => '/',
-        'cleanup'  => true,
+        'host'             => 'localhost',
+        'username'         => 'guest',
+        'password'         => 'guest',
+        'port'             => '5672',
+        'vhost'            => '/',
+        'cleanup'          => true,
+        'only_one_channel' => false
     ];
 
     /**
@@ -115,7 +116,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
         $message = $message instanceof AMQPMessage
             ? $message
             : new AMQPMessage($message);
-        $this->connection->channel()->basic_publish($message, $exchange, $routing_key);
+        $this->getChannel()->basic_publish($message, $exchange, $routing_key);
     }
 
     /**
@@ -137,8 +138,8 @@ class AMQP extends CodeceptionModule implements RequiresPackage
             ? $message
             : new AMQPMessage($message);
 
-        $this->connection->channel()->queue_declare($queue);
-        $this->connection->channel()->basic_publish($message, '', $queue);
+        $this->getChannel()->queue_declare($queue);
+        $this->getChannel()->basic_publish($message, '', $queue);
     }
 
     /**
@@ -176,7 +177,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
         $arguments = null,
         $ticket = null
     ) {
-        return $this->connection->channel()->exchange_declare(
+        return $this->getChannel()->exchange_declare(
             $exchange,
             $type,
             $passive,
@@ -221,7 +222,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
         $arguments = null,
         $ticket = null
     ) {
-        return $this->connection->channel()->queue_declare(
+        return $this->getChannel()->queue_declare(
             $queue,
             $passive,
             $durable,
@@ -263,7 +264,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
         $arguments = null,
         $ticket = null
     ) {
-        return $this->connection->channel()->queue_bind(
+        return $this->getChannel()->queue_bind(
             $queue,
             $exchange,
             $routing_key,
@@ -291,7 +292,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
      */
     public function seeMessageInQueueContainsText($queue, $text)
     {
-        $msg = $this->connection->channel()->basic_get($queue);
+        $msg = $this->getChannel()->basic_get($queue);
         if (!$msg) {
             $this->fail("Message was not received");
         }
@@ -316,7 +317,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
      */
     public function grabMessageFromQueue($queue)
     {
-        $message = $this->connection->channel()->basic_get($queue);
+        $message = $this->getChannel()->basic_get($queue);
         return $message;
     }
 
@@ -337,7 +338,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
             throw new ModuleException(__CLASS__, "'$queueName' doesn't exist in queues config list");
         }
 
-        $this->connection->channel()->queue_purge($queueName, true);
+        $this->getChannel()->queue_purge($queueName, true);
     }
 
     /**
@@ -354,6 +355,20 @@ class AMQP extends CodeceptionModule implements RequiresPackage
         $this->cleanup();
     }
 
+    /**
+     * @return AMQPChannel
+     */
+    protected function getChannel()
+    {
+        if ($this->config['only_one_channel']) {
+            if ($this->channel === null) {
+                $this->channel = $this->connection->channel();
+            }
+            return $this->channel;
+        }
+        return $this->connection->channel();
+    }
+
     protected function cleanup()
     {
         if (!isset($this->config['queues'])) {
@@ -364,7 +379,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
         }
         foreach ($this->config['queues'] as $queue) {
             try {
-                $this->connection->channel()->queue_purge($queue);
+                $this->getChannel()->queue_purge($queue);
             } catch (AMQPProtocolChannelException $e) {
                 // ignore if exchange/queue doesn't exist and rethrow exception if it's something else
                 if ($e->getCode() !== 404) {
